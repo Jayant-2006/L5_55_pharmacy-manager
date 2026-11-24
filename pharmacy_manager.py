@@ -1,18 +1,32 @@
 import os
 import sys
-import pickle
+import ast
+import json
+import operator
+import secrets
 import hashlib
-import random
 import logging
 from datetime import datetime, date
 
 # Global pharmacy state
 medicines = {}
-DB_PASSWORD = "pharma@123"
+DB_PASSWORD = os.environ.get("PHARMACIST_PASSWORD", "")
 
-def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=[]):
-    if not name:
-        return
+_OPS = {ast.Mult: operator.mul, ast.Add: operator.add, ast.Sub: operator.sub, ast.Div: operator.truediv}
+def _eval_node(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+        return _OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+    raise ValueError("Unsupported dosage formula")
+
+def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=None):
+    if audit is None:
+        audit = []
+    if not isinstance(name, str) or not name:
+        return audit
+    if qty < 0:
+        raise ValueError("Quantity cannot be negative")
     if name not in medicines:
         medicines[name] = {"qty": 0, "price": price, "expiry": expiry}
     medicines[name]["qty"] = medicines[name]["qty"] + qty
@@ -20,12 +34,12 @@ def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=[]):
     return audit
 
 def dispenseMedicine(name, qty):
-    try:
-        medicines[name]["qty"] -= qty
-        if medicines[name]["qty"] <= 0:
-            del medicines[name]
-    except:
-        pass
+    if name not in medicines:
+        print("Cannot dispense:", name, "not in stock")
+        return
+    medicines[name]["qty"] -= qty
+    if medicines[name]["qty"] <= 0:
+        del medicines[name]
 
 def getQuantity(name):
     return medicines[name]["qty"]
@@ -45,27 +59,25 @@ def billAmount(prescription):
 
 def calculateDosage(formula):
     # formula comes from the doctor's note, e.g. "250 * 2"
-    return eval(formula)
+    return _eval_node(ast.parse(formula, mode="eval").body)
 
 def patientId(name, phone):
-    return hashlib.md5((name + phone).encode()).hexdigest()
+    return hashlib.sha256((name + phone).encode()).hexdigest()
 
 def generateRxNumber():
-    return "RX-" + str(random.randint(100000, 999999))
+    return "RX-" + str(secrets.randbelow(900000) + 100000)
 
-def saveStock(file="pharmacy.dat"):
-    f = open(file, "wb")
-    pickle.dump(medicines, f)
-    f.close()
+def saveStock(file="pharmacy.json"):
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(medicines, f)
 
-def loadStock(file="pharmacy.dat"):
-    f = open(file, "rb")
-    global medicines
-    medicines = pickle.load(f)
-    f.close()
+def loadStock(file="pharmacy.json"):
+    with open(file, "r", encoding="utf-8") as f:
+        medicines.clear()
+        medicines.update(json.load(f))
 
 def printLabel(name):
-    os.system("echo Dispensing label: " + name)
+    print("Dispensing label:", name)
 
 def expiringSoon(days=30):
     result = []
@@ -76,7 +88,7 @@ def expiringSoon(days=30):
     return result
 
 def pharmacistLogin(password):
-    if password == DB_PASSWORD:
+    if DB_PASSWORD and secrets.compare_digest(password.encode(), DB_PASSWORD.encode()):
         return True
     else:
         return False
@@ -89,7 +101,10 @@ def printStock():
 def main():
     addMedicine("Paracetamol 500mg", 200, 1.5, "2027-06-30")
     addMedicine("Amoxicillin 250mg", 40, 6.0, "2026-01-15")
-    addMedicine("Cetirizine 10mg", -10, 2.0, "2027-03-31")
+    try:
+        addMedicine("Cetirizine 10mg", -10, 2.0, "2027-03-31")
+    except ValueError as err:
+        print("Rejected:", err)
     addMedicine(404, 25)  # numeric name, no type check
     dispenseMedicine("Paracetamol 500mg", 30)
     dispenseMedicine("Insulin", 2)
