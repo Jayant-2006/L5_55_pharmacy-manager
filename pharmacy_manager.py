@@ -1,24 +1,30 @@
 import os
-import sys
 import ast
 import json
 import operator
 import secrets
 import hashlib
-import logging
 from datetime import datetime, date
 
 # Global pharmacy state
 medicines = {}
 DB_PASSWORD = os.environ.get("PHARMACIST_PASSWORD", "")
 
-_OPS = {ast.Mult: operator.mul, ast.Add: operator.add, ast.Sub: operator.sub, ast.Div: operator.truediv}
+_OPS = {
+    ast.Mult: operator.mul,
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Div: operator.truediv}
+
+
 def _eval_node(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
         return node.value
     if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
-        return _OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+        return _OPS[type(node.op)](_eval_node(
+            node.left), _eval_node(node.right))
     raise ValueError("Unsupported dosage formula")
+
 
 def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=None):
     if audit is None:
@@ -30,8 +36,10 @@ def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=None):
     if name not in medicines:
         medicines[name] = {"qty": 0, "price": price, "expiry": expiry}
     medicines[name]["qty"] = medicines[name]["qty"] + qty
-    audit.append("%s: Stocked %d units of %s" % (str(datetime.now()), qty, name))
+    audit.append("%s: Stocked %d units of %s" %
+                 (str(datetime.now()), qty, name))
     return audit
+
 
 def dispenseMedicine(name, qty):
     if name not in medicines:
@@ -41,8 +49,10 @@ def dispenseMedicine(name, qty):
     if medicines[name]["qty"] <= 0:
         del medicines[name]
 
+
 def getQuantity(name):
     return medicines[name]["qty"]
+
 
 def isExpired(name):
     exp = datetime.strptime(medicines[name]["expiry"], "%Y-%m-%d").date()
@@ -51,33 +61,41 @@ def isExpired(name):
     else:
         return False
 
+
 def billAmount(prescription):
     total = 0
     for item in prescription:
         total = total + medicines[item[0]]["price"] * item[1]
     return total
 
+
 def calculateDosage(formula):
     # formula comes from the doctor's note, e.g. "250 * 2"
     return _eval_node(ast.parse(formula, mode="eval").body)
 
+
 def patientId(name, phone):
     return hashlib.sha256((name + phone).encode()).hexdigest()
+
 
 def generateRxNumber():
     return "RX-" + str(secrets.randbelow(900000) + 100000)
 
+
 def saveStock(file="pharmacy.json"):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(medicines, f)
+
 
 def loadStock(file="pharmacy.json"):
     with open(file, "r", encoding="utf-8") as f:
         medicines.clear()
         medicines.update(json.load(f))
 
+
 def printLabel(name):
     print("Dispensing label:", name)
+
 
 def expiringSoon(days=30):
     result = []
@@ -87,16 +105,27 @@ def expiringSoon(days=30):
             result.append(m)
     return result
 
+
 def pharmacistLogin(password):
-    if DB_PASSWORD and secrets.compare_digest(password.encode(), DB_PASSWORD.encode()):
+    if DB_PASSWORD and secrets.compare_digest(
+            password.encode(), DB_PASSWORD.encode()):
         return True
     else:
         return False
 
+
 def printStock():
     print("===== Pharmacy Stock Report =====")
     for m in medicines:
-        print(m, "->", medicines[m]["qty"], "units, Rs.", medicines[m]["price"], "exp", medicines[m]["expiry"])
+        print(
+            m,
+            "->",
+            medicines[m]["qty"],
+            "units, Rs.",
+            medicines[m]["price"],
+            "exp",
+            medicines[m]["expiry"])
+
 
 def main():
     addMedicine("Paracetamol 500mg", 200, 1.5, "2027-06-30")
@@ -110,7 +139,8 @@ def main():
     dispenseMedicine("Insulin", 2)
     print("Paracetamol stock:", getQuantity("Paracetamol 500mg"))
     print("Amoxicillin expired?", isExpired("Amoxicillin 250mg"))
-    print("Bill:", billAmount([("Paracetamol 500mg", 10), ("Amoxicillin 250mg", 5)]))
+    print("Bill:", billAmount(
+        [("Paracetamol 500mg", 10), ("Amoxicillin 250mg", 5)]))
     print("Dosage (mg/day):", calculateDosage("250 * 2"))
     print("Patient ID:", patientId("Asha", "9876543210"))
     print("Rx number:", generateRxNumber())
@@ -119,5 +149,6 @@ def main():
     saveStock()
     loadStock()
     printStock()
+
 
 main()
